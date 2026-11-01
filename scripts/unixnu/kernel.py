@@ -294,4 +294,26 @@ def prelink(ctx):
                     log(f'kernel: prelink failed; diagnostic record {destination}')
         os.replace(candidate, output)
     log(f'kernel: {output} sha256 {sha256_file(output)}')
+    publish_reference_candidate(ctx, output)
     return output
+
+
+def publish_reference_candidate(ctx, output):
+    """Republish the prelinked plan under the name the board's display audits read.
+
+    Those audits look for build/xnu-prelink/native-owner-mobile-graphics-candidate.{macho,json};
+    the plan written beside the prelinked kernel already carries every field they verify, so this
+    only copies it under the expected name. Boards that do not run those audits are unaffected.
+    """
+    if not ctx.board.get('kernel', {}).get('prelink', {}).get('reference_candidate'):
+        return
+    plan = output.with_suffix('.json')
+    if not plan.is_file() or not output.is_file():
+        log('kernel: no prelink plan to publish as a reference candidate')
+        return
+    directory = ctx.tree / 'build/xnu-prelink'
+    directory.mkdir(parents=True, exist_ok=True)
+    name = ctx.board['kernel']['prelink']['reference_candidate']
+    shutil.copyfile(plan, directory / (name + '.json'))
+    shutil.copyfile(output, directory / (name + '.macho'))
+    log(f'kernel: published reference candidate {directory / name}')
