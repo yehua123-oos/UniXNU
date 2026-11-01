@@ -46,6 +46,7 @@
   UefiRuntimeServicesTableLib
 
 [Guids]
+  gEfiEventExitBootServicesGuid   ## CONSUMES   # MUYU BRING-UP: EBS probe
   gEfiFileInfoGuid                ## CONSUMES
   gFdtTableGuid                   ## SOMETIMES_CONSUMES ## SOMETIMES_PRODUCES
   gLinuxEfiInitrdMediaGuid        ## SOMETIMES_PRODUCES

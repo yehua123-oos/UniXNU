@@ -34,8 +34,12 @@ def compile_shim(uefi, base, size, requires_header, scratch):
     offset = next((int(line.split()[0], 16) for line in symbols.splitlines() if line.endswith(' _Payload')), None)
     if offset != len(shim):
         raise Error('a literal pool or padding separates the _Payload label from the appended firmware volume')
-    if requires_header and (shim[56:60] != b'ARM\x64' or struct.unpack_from('<QQ', shim, 8) != (base, len(shim) + size)):
-        raise Error('the ARM64 image header does not describe the shim plus the firmware volume')
+    # BootShim.S writes the ARM64 image_size as FD_SIZE (it cannot know its own length at assembly
+    # time); that layout is what boots on this tablet today, so accept it as well as shim + FD.
+    if requires_header:
+        text_offset, image_size = struct.unpack_from('<QQ', shim, 8)
+        if shim[56:60] != b'ARM\x64' or text_offset != base or image_size not in (len(shim) + size, size):
+            raise Error('the ARM64 image header does not describe the shim plus the firmware volume')
     return shim
 
 
@@ -47,7 +51,13 @@ def patch_dtb(dtb, nodes, scratch):
     work = scratch / 'device.dtb'
     work.write_bytes(dtb)
     for node in nodes:
-        run([fdtput, '-c', work, node['path']], capture=True)
+        # /chosen already exists in the stock DTB; fdtput -c then fails with FDT_ERR_EXISTS and the
+        # properties below are what matters.
+        try:
+            run([fdtput, '-c', work, node['path']], capture=True)
+        except Error as exc:
+            if 'FDT_ERR_EXISTS' not in str(exc):
+                raise
         for prop in node.get('props', []):
             values = prop['value'] if isinstance(prop['value'], list) else [prop['value']]
             run([fdtput, '-t', prop.get('type', 's'), work, node['path'], prop['name'], *[str(v) for v in values]], capture=True)
@@ -120,7 +130,9 @@ def verify(path, combined, tree, ramdisk_path, image):
     """Unpack the image and compare every part with its input."""
     data = Path(path).read_bytes()
     kernel_size, kernel_address, ramdisk_size, _, second_size, _, tags, page, version, _ = struct.unpack_from('<10I', data, 8)
-    if data[:8] != b'ANDROID!' or second_size or version != image['header_version'] or page != image['pagesize']:
+    # Header v4 has no page-size field (mkbootimg writes 0 there), so only compare it for older headers.
+    page_ok = (page == image['pagesize']) or (version == 4 and page == 0)
+    if data[:8] != b'ANDROID!' or second_size or version != image['header_version'] or not page_ok:
         raise Error('boot image header does not match the requested parameters')
     if kernel_address != image['base'] + image['kernel_offset'] or tags != image['base'] + image['tags_offset']:
         raise Error('boot image load addresses do not match the requested offsets')

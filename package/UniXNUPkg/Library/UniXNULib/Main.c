@@ -5,6 +5,8 @@
   SPDX-License-Identifier: BSD-2-Clause-Patent
 **/
 
+#include <Guid/EventGroup.h>
+
 #include "Internal.h"
 
 #include <Protocol/SerialIo.h>
@@ -46,6 +48,35 @@ UniXNULog (
   }
 }
 
+
+//
+// MUYU BRING-UP: ExitBootServices probe. Filling the panel cyan from this callback
+// shows that the notify list reached a registration made *after* UniXNUConnectAll(),
+// i.e. after every driver this boot has started. Magenta (from the firmware's BDS
+// probe) but not cyan narrows the fault to a driver started during that connect.
+//
+STATIC
+VOID
+EFIAPI
+MuyuAppExitBootServicesNotify (
+  IN EFI_EVENT  Event,
+  IN VOID       *Context
+  )
+{
+  EFI_GRAPHICS_OUTPUT_PROTOCOL   *Gop = NULL;
+  EFI_GRAPHICS_OUTPUT_BLT_PIXEL   Cyan = { 0x00, 0xFF, 0xFF, 0 };
+
+  (VOID)Event;
+  (VOID)Context;
+  Print (L"MUYU: app EBS notify reached\n");
+  if (!EFI_ERROR (gBS->LocateProtocol (&gEfiGraphicsOutputProtocolGuid, NULL, (VOID **)&Gop)) &&
+      (Gop != NULL) && (Gop->Mode != NULL) && (Gop->Mode->Info != NULL))
+  {
+    Gop->Blt (Gop, &Cyan, EfiBltVideoFill, 0, 0, 0, 0,
+              Gop->Mode->Info->HorizontalResolution, Gop->Mode->Info->VerticalResolution, 0);
+  }
+}
+
 EFI_STATUS
 EFIAPI
 UniXNURun (
@@ -80,6 +111,20 @@ UniXNURun (
   //
   if (Host == UniXNUHostFirmware) {
     UniXNUConnectAll ();
+
+    //
+    // MUYU BRING-UP: register the ExitBootServices probe after the connect, so it is
+    // later in the notify list than any driver that connect started.
+    //
+    {
+      EFI_EVENT  MuyuEbsEvent = NULL;
+
+      if (!EFI_ERROR (gBS->CreateEventEx (EVT_NOTIFY_SIGNAL, TPL_CALLBACK, MuyuAppExitBootServicesNotify, NULL,
+                                         &gEfiEventExitBootServicesGuid, &MuyuEbsEvent)))
+      {
+        Print (L"MUYU: app EBS probe registered\n");
+      }
+    }
   }
 
   UniXNUConfigLoad (ImageHandle, &Config);
