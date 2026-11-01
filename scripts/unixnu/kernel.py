@@ -313,7 +313,9 @@ def publish_reference_candidate(ctx, output):
         return
     directory = ctx.tree / 'build/xnu-prelink'
     directory.mkdir(parents=True, exist_ok=True)
-    name = ctx.board['kernel']['prelink']['reference_candidate']
-    shutil.copyfile(plan, directory / (name + '.json'))
-    shutil.copyfile(output, directory / (name + '.macho'))
-    log(f'kernel: published reference candidate {directory / name}')
+    spec = ctx.board['kernel']['prelink']['reference_candidate']
+    names = spec if isinstance(spec, list) else [spec]
+    for name in names:
+        shutil.copyfile(plan, directory / (name + '.json'))
+        shutil.copyfile(output, directory / (name + '.macho'))
+        log(f'kernel: published reference candidate {directory / name}')
